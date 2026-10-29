@@ -1,0 +1,6 @@
+```text
+   Flask
+   requests
+   beautifulsoup4
+   gunicorn
+   ```
