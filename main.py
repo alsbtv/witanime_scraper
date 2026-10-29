@@ -6,7 +6,8 @@ app = Flask(__name__)
 
 @app.route('/latest-episodes')
 def latest_episodes():
-    domains = ["https://anime4up.com/", "https://anime4up.tv/"]
+    # قائمة النطاقات المحتملة لموقع Anime4Up
+    domains = ["https://anime4up.com/", "https://anime4up.tv/", "https://wl.anime4up.rest/"]
     scraper = cloudscraper.create_scraper()
     
     html_content = ""
@@ -16,7 +17,8 @@ def latest_episodes():
         try:
             response = scraper.get(domain, timeout=15)
             if response.status_code == 200:
-                html_content = response.text
+                # إصلاح اللغة العربية (UTF-8)
+                html_content = response.content.decode('utf-8', errors='ignore')
                 working_domain = domain
                 break
         except:
@@ -26,23 +28,24 @@ def latest_episodes():
         return jsonify({"error": "Could not reach Anime4Up"}), 500
 
     soup = BeautifulSoup(html_content, 'html.parser')
+    results = []
     
-    # البحث عن أي عنصر يشبه بطاقة الأنمي (تجربة عدة كلاسات)
+    # البحث عن البطاقات بأكثر من كلاس محتمل
     items = soup.select(".anime-card-container")
+    if not items: items = soup.select(".anime-card")
+    if not items: items = soup.select("div.anime")
+    
     if not items:
-        items = soup.select("div.anime-card")
-    if not items:
-        items = soup.select("article")
-        
-    if not items:
-        # إذا لم نجد شيئاً، نطبع جزءاً من الـ HTML لنعرف السبب
+        # إذا لم نجد، نطبع جزءاً من الـ body لنرى الكلاسات الحقيقية
+        body = soup.find('body')
+        snippet = str(body)[:2500] if body else html_content[1000:3000]
         return jsonify({
-            "message": "Could not find anime cards. Here is a snippet of the HTML to debug:",
-            "html_snippet": html_content[:1500] # أول 1500 حرف
+            "message": "Could not find anime cards. Here is a snippet of the BODY to debug:",
+            "body_snippet": snippet
         })
 
-    results = []
     for item in items:
+        # البحث عن العنوان والصورة بأكثر من كلاس
         title_elem = item.select_one(".anime-card-title")
         if not title_elem: title_elem = item.select_one("h3")
         if not title_elem: title_elem = item.select_one("h2")
