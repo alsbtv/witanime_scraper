@@ -6,8 +6,8 @@ app = Flask(__name__)
 
 @app.route('/latest-episodes')
 def latest_episodes():
-    # الموقع العربي الصحيح
-    domains = ["https://witanime.pics/", "https://witanime.com/"]
+    # استخدام موقع Anime4Up كبديل
+    domains = ["https://anime4up.com/", "https://anime4up.tv/"]
     scraper = cloudscraper.create_scraper()
     
     html_content = ""
@@ -24,12 +24,12 @@ def latest_episodes():
             continue
             
     if not html_content:
-        return jsonify({"error": "Could not reach witanime.pics or witanime.com"}), 500
+        return jsonify({"error": "Could not reach Anime4Up"}), 500
 
     soup = BeautifulSoup(html_content, 'html.parser')
     results = []
     
-    # المحددات الصحيحة للموقع العربي
+    # المحددات الخاصة بموقع Anime4Up
     items = soup.select(".anime-card-container")
     
     for item in items:
@@ -49,10 +49,10 @@ def latest_episodes():
                 "url": link
             })
             
-    # إذا لم يجد شيئاً، نجرب البحث العشوائي
+    # إذا لم يجد شيئاً (احتياطي)
     if not results:
         for item in soup.select("article"):
-            title_elem = item.select_one("h2, h3, .title")
+            title_elem = item.select_one("h2, h3, .title, .anime-card-title")
             img_elem = item.select_one("img")
             if title_elem and img_elem:
                 title = title_elem.text.strip()
@@ -65,7 +65,7 @@ def latest_episodes():
                 })
 
     if not results:
-        return jsonify({"message": "Reached site but couldn't find anime. HTML structure changed."})
+        return jsonify({"message": "Reached site but couldn't find anime. Selectors might be wrong."})
 
     return jsonify(results)
 
