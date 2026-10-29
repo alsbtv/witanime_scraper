@@ -1,12 +1,12 @@
 from flask import Flask, jsonify
 import cloudscraper
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
 
 @app.route('/latest-episodes')
 def latest_episodes():
-    # قائمة النطاقات المحتملة لموقع Anime4Up
     domains = ["https://anime4up.com/", "https://anime4up.tv/", "https://wl.anime4up.rest/"]
     scraper = cloudscraper.create_scraper()
     
@@ -17,7 +17,6 @@ def latest_episodes():
         try:
             response = scraper.get(domain, timeout=15)
             if response.status_code == 200:
-                # إصلاح اللغة العربية (UTF-8)
                 html_content = response.content.decode('utf-8', errors='ignore')
                 working_domain = domain
                 break
@@ -29,43 +28,42 @@ def latest_episodes():
 
     soup = BeautifulSoup(html_content, 'html.parser')
     results = []
-    
-    # البحث عن البطاقات بأكثر من كلاس محتمل
-    items = soup.select(".anime-card-container")
-    if not items: items = soup.select(".anime-card")
-    if not items: items = soup.select("div.anime")
-    
-    if not items:
-        # إذا لم نجد، نطبع جزءاً من الـ body لنرى الكلاسات الحقيقية
-        body = soup.find('body')
-        snippet = str(body)[:2500] if body else html_content[1000:3000]
-        return jsonify({
-            "message": "Could not find anime cards. Here is a snippet of the BODY to debug:",
-            "body_snippet": snippet
-        })
+    seen_titles = set() # لمنع التكرار
 
-    for item in items:
-        # البحث عن العنوان والصورة بأكثر من كلاس
-        title_elem = item.select_one(".anime-card-title")
-        if not title_elem: title_elem = item.select_one("h3")
-        if not title_elem: title_elem = item.select_one("h2")
-        
-        img_elem = item.select_one("img")
-        link_elem = item.select_one("a")
-        
-        if title_elem and img_elem:
-            title = title_elem.text.strip()
-            img = img_elem.get("src") or img_elem.get("data-src") or ""
-            if img.startswith("//"): img = "https:" + img
-            link = link_elem.get("href") if link_elem else ""
-            
-            results.append({
-                "title": title,
-                "poster": img,
-                "url": link
-            })
+    # البحث عن أي رابط يحتوي على /anime/ أو /episode/
+    for a_tag in soup.find_all('a', href=True):
+        href = a_tag['href']
+        if '/anime/' in href or '/episode/' in href:
+            # البحث عن الصورة داخل الرابط أو بجانبه
+            img_tag = a_tag.find('img')
+            if not img_tag and a_tag.parent:
+                img_tag = a_tag.parent.find('img')
+                
+            # استخراج العنوان
+            title = a_tag.text.strip()
+            if not title and img_tag:
+                title = img_tag.get('alt', '').strip()
+                
+            # استخراج الصورة
+            img_url = ""
+            if img_tag:
+                img_url = img_tag.get('src') or img_tag.get('data-src') or img_tag.get('data-lazy-src') or ""
+                if img_url.startswith("//"): img_url = "https:" + img_url
+                
+            # تنظيف العنوان والتأكد من أنه ليس فارغاً
+            title = re.sub(r'\s+', ' ', title)
+            if title and len(title) > 3 and title not in seen_titles and img_url:
+                seen_titles.add(title)
+                results.append({
+                    "title": title,
+                    "poster": img_url,
+                    "url": href
+                })
 
-    return jsonify(results)
+    if not results:
+        return jsonify({"message": "Could not find anime links using brute force."})
+
+    return jsonify(results[:20]) # إرجاع أول 20 أنمي فقط
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
