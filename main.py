@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify
 import cloudscraper
 from bs4 import BeautifulSoup
 
@@ -6,7 +6,8 @@ app = Flask(__name__)
 
 @app.route('/latest-episodes')
 def latest_episodes():
-    domains = ["https://witanime.best/", "https://witanime.com/"]
+    # الموقع العربي الصحيح
+    domains = ["https://witanime.pics/", "https://witanime.com/"]
     scraper = cloudscraper.create_scraper()
     
     html_content = ""
@@ -14,8 +15,8 @@ def latest_episodes():
     
     for domain in domains:
         try:
-            response = scraper.get(domain, timeout=10)
-            if response.status_code == 200:
+            response = scraper.get(domain, timeout=15)
+            if response.status_code == 200 and "anime" in response.text.lower():
                 html_content = response.text
                 working_domain = domain
                 break
@@ -23,53 +24,50 @@ def latest_episodes():
             continue
             
     if not html_content:
-        return jsonify({"error": "All domains failed."}), 500
+        return jsonify({"error": "Could not reach witanime.pics or witanime.com"}), 500
 
     soup = BeautifulSoup(html_content, 'html.parser')
     results = []
     
-    # سنجرب أوسع كلاس ممكن
-    items = soup.select("article, .post-item, .anime-card-container, .anime-card, .thumb")
+    # المحددات الصحيحة للموقع العربي
+    items = soup.select(".anime-card-container")
     
     for item in items:
-        # استخراج أي رابط موجود
-        link_elem = item.select_one("a")
-        link = link_elem.get("href", "") if link_elem else ""
-        if link.startswith("/"): link = working_domain.rstrip("/") + link
-        
-        # استخراج أي صورة موجودة
+        title_elem = item.select_one(".anime-card-title")
         img_elem = item.select_one("img")
-        poster = ""
-        if img_elem:
-            poster = img_elem.get("src") or img_elem.get("data-src") or img_elem.get("data-lazy-src") or ""
-            if poster.startswith("//"): poster = "https:" + poster
-            
-        # استخراج أي نص كعنوان
-        title = item.text.strip()[:50] # نأخذ أول 50 حرف كعنوان مؤقت
+        link_elem = item.select_one("a")
         
-        if title and link:
-            results.append({"title": title, "poster": poster, "url": link})
+        if title_elem and img_elem:
+            title = title_elem.text.strip()
+            img = img_elem.get("src") or img_elem.get("data-src") or ""
+            if img.startswith("//"): img = "https:" + img
+            link = link_elem.get("href") if link_elem else ""
+            
+            results.append({
+                "title": title,
+                "poster": img,
+                "url": link
+            })
+            
+    # إذا لم يجد شيئاً، نجرب البحث العشوائي
+    if not results:
+        for item in soup.select("article"):
+            title_elem = item.select_one("h2, h3, .title")
+            img_elem = item.select_one("img")
+            if title_elem and img_elem:
+                title = title_elem.text.strip()
+                img = img_elem.get("src") or img_elem.get("data-src") or ""
+                if img.startswith("//"): img = "https:" + img
+                results.append({
+                    "title": title,
+                    "poster": img,
+                    "url": working_domain
+                })
 
     if not results:
-        return jsonify({"message": "Still no results", "items_found": len(items)})
-        
-    return jsonify(results)
+        return jsonify({"message": "Reached site but couldn't find anime. HTML structure changed."})
 
-# هذه الصفحة الجديدة ستطبع الكود الخام لنرى الكلاسات الحقيقية
-@app.route('/html')
-def get_html():
-    scraper = cloudscraper.create_scraper()
-    try:
-        res = scraper.get("https://witanime.best/", timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        items = soup.select("article, .post-item, .anime-card-container, .anime-card, .thumb")
-        if items:
-            # نطبع أول عنصرين لكي نرى شكلهم
-            html_snippet = "".join([item.prettify() for item in items[:2]])
-            return Response(html_snippet, mimetype='text/html')
-        return "No items found."
-    except Exception as e:
-        return str(e)
+    return jsonify(results)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
